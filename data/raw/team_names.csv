@@ -1,0 +1,46 @@
+canonical,fd_name,fixture_name,tm_club_id,tm_name,metodo
+Arsenal,Arsenal,Arsenal,11.0,Arsenal Football Club,exacta
+Aston Villa,Aston Villa,Aston Villa,405.0,Aston Villa Football Club,exacta
+Birmingham,Birmingham,,,,sin_dato_transfermarkt
+Blackburn,Blackburn,,,,sin_dato_transfermarkt
+Blackpool,Blackpool,,,,sin_dato_transfermarkt
+Bolton,Bolton,,,,sin_dato_transfermarkt
+Bournemouth,Bournemouth,Bournemouth,989.0,Association Football Club Bournemouth,exacta
+Brentford,Brentford,Brentford,1148.0,Brentford Football Club,exacta
+Brighton,Brighton,Brighton,1237.0,Brighton and Hove Albion Football Club,prefijo
+Burnley,Burnley,,1132.0,Burnley Football Club,exacta
+Cardiff,Cardiff,,603.0,Cardiff City,prefijo
+Charlton,Charlton,,,,sin_dato_transfermarkt
+Chelsea,Chelsea,Chelsea,631.0,Chelsea Football Club,exacta
+Coventry,Coventry,Coventry,,,ascendido_sin_historico
+Crystal Palace,Crystal Palace,Crystal Palace,873.0,Crystal Palace Football Club,exacta
+Derby,Derby,,,,sin_dato_transfermarkt
+Everton,Everton,Everton,29.0,Everton Football Club,exacta
+Fulham,Fulham,Fulham,931.0,Fulham Football Club,exacta
+Huddersfield,Huddersfield,,1110.0,Huddersfield Town,prefijo
+Hull,Hull,Hull City,3008.0,Hull City,prefijo
+Ipswich,Ipswich,Ipswich,677.0,Ipswich Town,prefijo
+Leeds,Leeds,Leeds,399.0,Leeds United Association Football Club,prefijo
+Leicester,Leicester,,1003.0,Leicester City,prefijo
+Liverpool,Liverpool,Liverpool,31.0,Liverpool Football Club,exacta
+Luton,Luton,,1031.0,Luton Town,prefijo
+Man City,Man City,Manchester City,281.0,Manchester City Football Club,manual
+Man United,Man United,Manchester United,985.0,Manchester United Football Club,manual
+Middlesbrough,Middlesbrough,,641.0,Middlesbrough FC,exacta
+Newcastle,Newcastle,Newcastle,762.0,Newcastle United Football Club,prefijo
+Norwich,Norwich,,1123.0,Norwich City,prefijo
+Nott'm Forest,Nott'm Forest,Nottingham Forest,703.0,Nottingham Forest Football Club,manual
+Portsmouth,Portsmouth,,,,sin_dato_transfermarkt
+QPR,QPR,,1039.0,Queens Park Rangers,manual
+Reading,Reading,,1032.0,Reading FC,exacta
+Sheffield United,Sheffield United,,350.0,Sheffield United,exacta
+Southampton,Southampton,,180.0,Southampton FC,exacta
+Stoke,Stoke,,512.0,Stoke City,prefijo
+Sunderland,Sunderland,Sunderland,289.0,Sunderland Association Football Club,exacta
+Swansea,Swansea,,2288.0,Swansea City,prefijo
+Tottenham,Tottenham,Tottenham,148.0,Tottenham Hotspur Football Club,prefijo
+Watford,Watford,,1010.0,Watford FC,exacta
+West Brom,West Brom,,984.0,West Bromwich Albion,prefijo
+West Ham,West Ham,,379.0,West Ham United Football Club,prefijo
+Wigan,Wigan,,1071.0,Wigan Athletic,prefijo
+Wolves,Wolves,,543.0,Wolverhampton Wanderers Football Club,manual

@@ -1,0 +1,23 @@
+# ── Núcleo ────────────────────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.11.0
+
+# ── Modelado ──────────────────────────────────────────────────────────────────
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# ── Ingesta de datos ──────────────────────────────────────────────────────────
+requests>=2.31.0
+
+# ── Visualización ─────────────────────────────────────────────────────────────
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# ── Utilidades ────────────────────────────────────────────────────────────────
+tqdm>=4.66.0          # barras de progreso en las simulaciones Monte Carlo
+
+# ── Opcional: xG y cuotas ─────────────────────────────────────────────────────
+# Descomentar cuando añadamos el bloque de xG (Understat/FBref) y las cuotas
+# de football-data.co.uk para el backtest. No hace falta para el pipeline base.
+# soccerdata>=1.9.0
