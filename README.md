@@ -46,7 +46,7 @@ adaptado de formato copa a formato liga.
 ```bash
 git clone https://github.com/<usuario>/Prediccion_Premier_2627.git
 cd Prediccion_Premier_2627
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ---
