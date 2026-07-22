@@ -1,0 +1,48 @@
+# ── Datos generados ───────────────────────────────────────────────────────────
+data/processed/
+models/
+results/
+
+# Ficheros grandes que se descargan aparte (ver README)
+data/raw/appearances.csv
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+ENV/
+
+# ── Notebooks ─────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Caché de soccerdata (xG, cuotas) ──────────────────────────────────────────
+.soccerdata/
+soccerdata_cache/
+
+# ── Herramientas ──────────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Editores ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Sistema operativo ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
