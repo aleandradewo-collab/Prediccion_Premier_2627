@@ -36,7 +36,7 @@ adaptado de formato copa a formato liga.
 - [x] Predicción partido a partido y por jornada
 - [x] Simulación condicionada a resultados ya jugados
 - [x] Features de plantilla y fichajes
-- [ ] Feature de congestión de calendario (Europa y copas)
+- [x] Feature de congestión de calendario — medida y descartada, ver más abajo
 - [ ] Predicciones individuales (Bota de Oro, asistencias)
 
 ---
@@ -110,6 +110,7 @@ Tarda unos 2 segundos.
 | `--as-of 2026-12-01` | Ratings calculados a otra fecha |
 | `--no-defaults` | Sin el prior de equipos ascendidos |
 | `--no-squad-prior` | Sin el prior de valor de plantilla (fichajes) |
+| `--no-congestion` | No cargar/aplicar el ajuste de congestión de calendario (inerte por defecto, ver nota metodológica) |
 | `--save-raw` | Guardar también los puntos de cada simulación |
 
 #### Predicción de una jornada
@@ -233,11 +234,13 @@ Prediccion_Premier_2627/
 │   ├── utils.py                              # rutas, carga y normalización
 │   ├── ratings.py                            # motor Dixon-Coles
 │   ├── squad.py                              # valor de plantilla (Transfermarkt)
+│   ├── congestion.py                         # descanso entre partidos, todas las competiciones
 │   └── simulator.py                          # Monte Carlo y exportación
 ├── scripts/                                  # ejecutables
 │   ├── download_footballdata.py              # ingesta reproducible
 │   ├── backtest_ratings.py                   # validación del motor
 │   ├── calibrate_squad_prior.py              # calibración del prior de plantilla
+│   ├── calibrate_congestion.py               # calibración (descartada) de la fatiga
 │   └── simulate_season.py                    # predicción de la temporada
 ├── models/                                   # en .gitignore
 ├── results/                                  # en .gitignore
@@ -255,6 +258,7 @@ otros módulos importan; `simulate_season.py` es lo que se lanza desde la termin
 | `utils.py` | **Consolidación.** Rutas y cargadores que normalizan las tres nomenclaturas, fuerzan formatos de fecha y validan integridad antes de que el modelo toque nada |
 | `ratings.py` | **Modelado.** `fit_ratings()` ajusta ataque, defensa y ventaja de local; `apply_defaults()` corrige equipos sin historia; `apply_squad_prior()` mezcla el rating con el valor de plantilla; `predict_match()` da probabilidades 1X2 |
 | `squad.py` | **Plantillas.** `squad_value_at()` valor de plantilla histórico (player_valuations.csv); `current_squad_value()` valor actual, post-fichajes (players.csv) |
+| `congestion.py` | **Calendario.** `rest_days()`/`matches_in_window()` descanso y carga reciente de un equipo, contando todas las competiciones de club (games.csv) |
 | `simulator.py` | **Simulación.** `predict_fixtures()` analítico por partido; `simulate_season()` Monte Carlo agregado; `export_results()` vuelca a CSV |
 
 ---
@@ -312,9 +316,10 @@ Frente a los ratings puramente históricos, Chelsea sube del 7º al 5º puesto (
 pero acotados — es la firma de un prior con peso 0,15, no de un modelo que haya
 sustituido la historia por el mercado.
 
-> **Aún pendiente: congestión de calendario (Europa y copas).** El valor de
-> plantilla ya está incorporado; queda por modelar el desgaste de jugar cada
-> pocos días entre Premier, Champions/Europa League y las copas domésticas.
+> **Congestión de calendario: probada y descartada.** El valor de plantilla
+> ya está incorporado; la fatiga por calendario apretado (Champions/Europa,
+> copas domésticas) se midió y no mostró efecto detectable en el backtest —
+> ver la nota metodológica más abajo para los números.
 
 ---
 
@@ -333,6 +338,40 @@ El paper original de 1997 corrige la infraestimación de marcadores bajos (0-0, 
 El modelo ya calibra los empates casi exactamente (23,6% predicho frente a 23,7% real)
 y tau los sobrestima. El código sigue disponible con `fit_rho=True`, pero el valor por
 defecto es `False`.
+
+### Congestión de calendario: descartada
+
+Jugar Champions League el martes y Premier el sábado deja menos descanso que una
+semana sin competición europea — la hipótesis, y el último bloque pendiente del
+roadmap, era que esa fatiga debía notarse en los goles. `scripts/calibrate_congestion.py`
+la puso a prueba de dos formas distintas, contando siempre TODAS las competiciones de
+club vía `games.csv` (liga, FA Cup, Carabao, UEFA), no sólo Premier:
+
+| | Cobertura | coef (MLE) | log-loss | RPS |
+|---|---|---|---|---|
+| Sin ajuste | — | — | 0,9755 | 0,2004 |
+| A. Déficit de descanso | 43,0% de locales con descanso corto | +0,0027 | 0,9755 | 0,2004 |
+| B. Carga reciente (10 días) | 5,7% de locales con carga alta | +0,0244 | 0,9755 | 0,2004 |
+
+**Ninguna mejora el backtest.** El coeficiente de máxima verosimilitud sale casi cero
+y con el signo equivocado en las dos — el esperado era negativo (menos descanso, menos
+goles). RPS y log-loss no se mueven ni en la cuarta cifra decimal. Es un resultado
+real, no ruido: 4.180 partidos evaluados, la misma metodología jornada a jornada que
+calibró la vida media y el prior de plantilla.
+
+¿Por qué no aparece el efecto? Con equipos que rotan plantilla en copas y una liga de
+20 equipos donde casi todos —no sólo los europeos— tienen tramos de calendario
+apretado (Navidad, repesca de copa), el "descanso" deja de distinguir bien a un
+equipo de otro. La fatiga puede ser real a nivel de jugador sin serlo a nivel de
+resultado de equipo, que es la única unidad que este modelo observa.
+
+**El mecanismo queda implementado, no la conclusión forzada.** `CONGESTION_COEF = 0.0`
+en `src/ratings.py` lo deja inerte por defecto; `fatigue_multiplier()`,
+`src/congestion.py` y el flag `--no-congestion` están listos para recalibrar si esto
+cambia con más temporadas o una medida de carga distinta a las dos probadas aquí.
+Además, `games.csv` se corta en marzo de 2026 (ver limitación de `player_valuations.csv`
+más abajo), así que hoy no aportaría nada a la temporada 2026/27 aunque el efecto
+existiera: no hay calendario europeo futuro con el que calcular el descanso.
 
 ### Valores por defecto para equipos sin datos
 

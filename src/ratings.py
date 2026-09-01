@@ -39,6 +39,7 @@ import pandas as pd
 from scipy.optimize import minimize_scalar
 from scipy.stats import poisson
 
+from src.congestion import NORMAL_REST_DAYS
 from src.utils import logger
 
 # ── Parámetros por defecto ────────────────────────────────────────────────────
@@ -90,6 +91,21 @@ SQUAD_ATTACK_INTERCEPT   = 0.0258
 SQUAD_DEFENSE_SLOPE      = -0.2056
 SQUAD_DEFENSE_INTERCEPT  = -0.0740
 SQUAD_PRIOR_WEIGHT       = 0.15
+
+# ── Congestión de calendario ──────────────────────────────────────────────────
+# Medido en scripts/calibrate_congestion.py y DESCARTADO, igual que tau: se
+# probaron dos formas de medir la fatiga (déficit de descanso desde el último
+# partido de club, y partidos jugados en los últimos 10 días, ambas contando
+# TODAS las competiciones vía games.csv) y ninguna mejora el backtest jornada
+# a jornada — RPS 0.2004 con y sin ajuste en las dos. El coeficiente por
+# máxima verosimilitud sale casi cero y sin el signo esperado en ambos casos.
+#
+# Conclusión honesta, no la que se esperaba: a nivel de Premier League no hay
+# un efecto de fatiga detectable con esta especificación. El mecanismo queda
+# implementado (fatigue_multiplier, src/congestion.py) por si esto cambia con
+# más temporadas o una medida distinta de carga; mientras tanto, coef=0 lo
+# deja inerte. Ver README para la comparación completa.
+CONGESTION_COEF = 0.0
 
 
 @dataclass
@@ -425,14 +441,36 @@ def apply_squad_prior(ratings: Ratings, squad_value,
 
 
 # ── Predicción ────────────────────────────────────────────────────────────────
+def fatigue_multiplier(rest: float | None) -> float:
+    """
+    Factor multiplicativo sobre los goles esperados de un equipo según su
+    descanso antes del partido.
+
+    `rest=None` (no hay dato de descanso, p.ej. games.csv no llega a esa
+    fecha) devuelve 1.0: sin información no hay penalización. Con descanso
+    igual o mayor que NORMAL_REST_DAYS tampoco hay penalización — más
+    descanso del normal no se premia, sólo se castiga el que falta.
+    """
+    if rest is None:
+        return 1.0
+    deficit = max(0.0, NORMAL_REST_DAYS - rest)
+    return float(np.exp(-CONGESTION_COEF * deficit))
+
+
 def predict_lambdas(ratings: Ratings, home: str, away: str,
-                    neutral: bool = False) -> tuple[float, float]:
+                    neutral: bool = False,
+                    rest_home: float | None = None,
+                    rest_away: float | None = None) -> tuple[float, float]:
     """
     Goles esperados de un enfrentamiento.
 
     Un equipo no presente en los ratings recibe los valores por defecto de
     ascendido, NO valores neutros: si no sabemos nada de un equipo, lo más
     probable es que venga de Segunda, no que sea de media tabla.
+
+    `rest_home`/`rest_away`: días de descanso antes de este partido, contando
+    TODAS las competiciones (ver src.congestion.rest_days). None si no hay
+    dato: el partido se predice igual que sin este módulo.
     """
     atk_h = ratings.attack.get(home, DEFAULT_ATTACK)
     def_h = ratings.defense.get(home, DEFAULT_DEFENSE)
@@ -440,9 +478,9 @@ def predict_lambdas(ratings: Ratings, home: str, away: str,
     def_a = ratings.defense.get(away, DEFAULT_DEFENSE)
     ha = 1.0 if neutral else ratings.home_adv
 
-    lh = float(np.clip(ratings.mu * atk_h * def_a * ha, LAMBDA_MIN, LAMBDA_MAX))
-    la = float(np.clip(ratings.mu * atk_a * def_h,      LAMBDA_MIN, LAMBDA_MAX))
-    return lh, la
+    lh = ratings.mu * atk_h * def_a * ha * fatigue_multiplier(rest_home)
+    la = ratings.mu * atk_a * def_h      * fatigue_multiplier(rest_away)
+    return float(np.clip(lh, LAMBDA_MIN, LAMBDA_MAX)), float(np.clip(la, LAMBDA_MIN, LAMBDA_MAX))
 
 
 def score_matrix(lh: float, la: float, rho: float = 0.0,
@@ -481,6 +519,9 @@ def match_probabilities(lh: float, la: float, rho: float = 0.0,
 
 def predict_match(ratings: Ratings, home: str, away: str, **kw) -> dict:
     """Atajo: ratings + equipos -> probabilidades."""
-    lh, la = predict_lambdas(ratings, home, away, neutral=kw.pop("neutral", False))
+    lh, la = predict_lambdas(ratings, home, away,
+                             neutral=kw.pop("neutral", False),
+                             rest_home=kw.pop("rest_home", None),
+                             rest_away=kw.pop("rest_away", None))
     return {"home": home, "away": away,
             **match_probabilities(lh, la, ratings.rho, **kw)}

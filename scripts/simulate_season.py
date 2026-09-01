@@ -27,6 +27,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.congestion import load_club_matches, team_date_index
 from src.ratings import apply_defaults, apply_squad_prior, fit_ratings
 from src.simulator import export_results, predict_fixtures, simulate_season
 from src.squad import current_squad_value
@@ -50,9 +51,9 @@ def build_ratings(args):
     return r
 
 
-def show_matches(ratings, fixtures, titulo):
+def show_matches(ratings, fixtures, titulo, date_index=None):
     """Modo partido a partido: probabilidades analíticas, sin Monte Carlo."""
-    pred = predict_fixtures(ratings, fixtures)
+    pred = predict_fixtures(ratings, fixtures, date_index=date_index)
 
     print("\n" + "=" * 74)
     print(f"  {titulo}")
@@ -90,6 +91,8 @@ def main():
                    help="No aplicar el prior de equipos ascendidos")
     p.add_argument("--no-squad-prior", action="store_true",
                    help="No aplicar el prior de valor de plantilla (fichajes)")
+    p.add_argument("--no-congestion", action="store_true",
+                   help="No aplicar la penalización por descanso corto (todas las competiciones)")
     p.add_argument("--save-raw", action="store_true",
                    help="Guardar también los puntos de cada simulación")
     p.add_argument("--verbose", action="store_true")
@@ -104,19 +107,23 @@ def main():
     fixtures = load_fixtures()
     ratings = build_ratings(args)
 
+    date_index = None
+    if not args.no_congestion:
+        date_index = team_date_index(load_club_matches())
+
     # ── Modo partido a partido ───────────────────────────────────────────────
     if args.matchday is not None:
         sub = fixtures[fixtures["matchday"] == args.matchday]
         if sub.empty:
             sys.exit(f"No hay partidos en la jornada {args.matchday}")
-        show_matches(ratings, sub, f"JORNADA {args.matchday}")
+        show_matches(ratings, sub, f"JORNADA {args.matchday}", date_index=date_index)
         return
 
     if args.date is not None:
         sub = fixtures[fixtures["date"] == pd.Timestamp(args.date)]
         if sub.empty:
             sys.exit(f"No hay partidos el {args.date}")
-        show_matches(ratings, sub, f"PARTIDOS DEL {args.date}")
+        show_matches(ratings, sub, f"PARTIDOS DEL {args.date}", date_index=date_index)
         return
 
     # ── Modo temporada completa ──────────────────────────────────────────────
@@ -129,7 +136,7 @@ def main():
         logger.info(f"Incorporando {len(played)} partidos ya jugados")
 
     res = simulate_season(ratings, fixtures, played=played,
-                          n_sims=args.sims, seed=args.seed)
+                          n_sims=args.sims, seed=args.seed, date_index=date_index)
 
     print("\n" + "=" * 74)
     print(f"  CLASIFICACIÓN PROYECTADA — {args.sims:,} temporadas simuladas")
@@ -157,7 +164,7 @@ def main():
         print(f"    {nombre:<18} {valor:.4f}  (esperado {esperado:.1f})  [{ok}]")
 
     print("\n  Ficheros generados:")
-    pred = predict_fixtures(ratings, fixtures)
+    pred = predict_fixtures(ratings, fixtures, date_index=date_index)
     export_results(res, fixtures_pred=pred, save_raw=args.save_raw)
 
     print(f"\n  Tiempo total: {time.time() - t0:.1f}s\n")
