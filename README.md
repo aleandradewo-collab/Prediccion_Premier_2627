@@ -35,7 +35,7 @@ adaptado de formato copa a formato liga.
 - [x] Simulador Monte Carlo de temporada completa
 - [x] Predicción partido a partido y por jornada
 - [x] Simulación condicionada a resultados ya jugados
-- [ ] Features de plantilla y fichajes
+- [x] Features de plantilla y fichajes
 - [ ] Feature de congestión de calendario (Europa y copas)
 - [ ] Predicciones individuales (Bota de Oro, asistencias)
 
@@ -109,6 +109,7 @@ Tarda unos 2 segundos.
 | `--played fichero.csv` | Incorporar resultados ya disputados |
 | `--as-of 2026-12-01` | Ratings calculados a otra fecha |
 | `--no-defaults` | Sin el prior de equipos ascendidos |
+| `--no-squad-prior` | Sin el prior de valor de plantilla (fichajes) |
 | `--save-raw` | Guardar también los puntos de cada simulación |
 
 #### Predicción de una jornada
@@ -231,10 +232,12 @@ Prediccion_Premier_2627/
 │   ├── __init__.py
 │   ├── utils.py                              # rutas, carga y normalización
 │   ├── ratings.py                            # motor Dixon-Coles
+│   ├── squad.py                              # valor de plantilla (Transfermarkt)
 │   └── simulator.py                          # Monte Carlo y exportación
 ├── scripts/                                  # ejecutables
 │   ├── download_footballdata.py              # ingesta reproducible
 │   ├── backtest_ratings.py                   # validación del motor
+│   ├── calibrate_squad_prior.py              # calibración del prior de plantilla
 │   └── simulate_season.py                    # predicción de la temporada
 ├── models/                                   # en .gitignore
 ├── results/                                  # en .gitignore
@@ -250,7 +253,8 @@ otros módulos importan; `simulate_season.py` es lo que se lanza desde la termin
 | Módulo | Rol |
 |---|---|
 | `utils.py` | **Consolidación.** Rutas y cargadores que normalizan las tres nomenclaturas, fuerzan formatos de fecha y validan integridad antes de que el modelo toque nada |
-| `ratings.py` | **Modelado.** `fit_ratings()` ajusta ataque, defensa y ventaja de local; `apply_defaults()` corrige equipos sin historia; `predict_match()` da probabilidades 1X2 |
+| `ratings.py` | **Modelado.** `fit_ratings()` ajusta ataque, defensa y ventaja de local; `apply_defaults()` corrige equipos sin historia; `apply_squad_prior()` mezcla el rating con el valor de plantilla; `predict_match()` da probabilidades 1X2 |
+| `squad.py` | **Plantillas.** `squad_value_at()` valor de plantilla histórico (player_valuations.csv); `current_squad_value()` valor actual, post-fichajes (players.csv) |
 | `simulator.py` | **Simulación.** `predict_fixtures()` analítico por partido; `simulate_season()` Monte Carlo agregado; `export_results()` vuelca a CSV |
 
 ---
@@ -285,25 +289,32 @@ Curva en U limpia con óptimo en 240 días. Los 3 años del modelo del Mundial (
 quedan claramente peor, lo que confirma que en liga la fuerza de un equipo cambia en
 escala de meses.
 
-### Proyección 2026/27 (sólo ratings históricos)
+### Proyección 2026/27 (ratings históricos + valor de plantilla)
 
 ```
   #   Equipo              Pts    P10-P90   Título    Top-4    Desc.
-  1   Arsenal            77.5      68-87    49.1%    96.9%     0.0%
-  2   Man City           76.4      67-86    42.8%    95.3%     0.0%
-  3   Liverpool          64.0      54-74     3.9%    53.7%     0.1%
-  4   Man United         59.6      49-70     1.3%    31.1%     0.3%
-  5   Aston Villa        56.9      47-67     0.5%    20.0%     0.9%
+  1   Arsenal            76.1      66-86    46.3%    94.6%     0.0%
+  2   Man City           75.5      66-85    42.3%    93.8%     0.0%
+  3   Liverpool          64.5      54-75     5.3%    55.2%     0.1%
+  4   Man United         59.8      49-70     1.7%    31.3%     0.3%
+  5   Chelsea            57.8      47-68     1.0%    22.8%     0.6%
+  6   Aston Villa        56.6      46-67     0.7%    18.2%     0.8%
+  7   Newcastle          56.4      46-67     0.8%    17.4%     0.9%
   ...
-  18  Hull               33.7      25-43     0.0%     0.0%    73.7%
-  19  Coventry           33.6      25-43     0.0%     0.0%    74.5%
-  20  Ipswich            32.5      23-42     0.0%     0.0%    79.3%
+  18  Coventry           34.1      25-43     0.0%     0.0%    72.2%
+  19  Ipswich            31.9      23-41     0.0%     0.0%    81.4%
+  20  Hull               30.2      22-39     0.0%     0.0%    87.6%
 ```
 
-> **Esta proyección aún no incorpora fichajes, plantillas ni congestión de calendario.**
-> Refleja el rendimiento de la temporada pasada, no el mercado de este verano. Los
-> bloques pendientes son precisamente los que la convertirán en una predicción real
-> de 2026/27.
+Frente a los ratings puramente históricos, Chelsea sube del 7º al 5º puesto (top-4
+17.0% → 22.8%: tiene la 3ª plantilla más valiosa de la liga) y Hull cae más
+(descenso 73.7% → 87.6%: la plantilla más barata de las 20). Movimientos reales
+pero acotados — es la firma de un prior con peso 0,15, no de un modelo que haya
+sustituido la historia por el mercado.
+
+> **Aún pendiente: congestión de calendario (Europa y copas).** El valor de
+> plantilla ya está incorporado; queda por modelar el desgaste de jugar cada
+> pocos días entre Premier, Champions/Europa League y las copas domésticas.
 
 ---
 
@@ -345,6 +356,60 @@ Efecto en el backtest: log-loss 0,9766 → 0,9755 y RPS 0,2008 → 0,2004. La me
 pequeña porque en el histórico casi todos los ascendidos habían pisado la Premier antes.
 El caso que el backtest **no puede medir** es el de Coventry, ausente por completo, que
 es justamente donde el default resulta imprescindible.
+
+### Prior de valor de plantilla
+
+Los ratings de Dixon-Coles son puramente de resultados: no saben nada de los
+fichajes de un verano hasta que el equipo lleva partidos jugados con la
+plantilla nueva. `src/squad.py` añade una segunda señal — el valor de mercado
+agregado de la plantilla (Transfermarkt) — y `apply_squad_prior()` la mezcla
+con el rating histórico.
+
+**Medido, no inventado**, igual que los defaults de ascendidos.
+`scripts/calibrate_squad_prior.py` responde dos preguntas por separado:
+
+1. **¿Cómo se traduce el valor de plantilla en rating?** Regresión de
+   log(ataque) y log(defensa) contra el valor de plantilla relativo a la
+   media de la liga esa temporada, sobre 220 equipo-temporada (2015/16 –
+   2025/26):
+
+   | | Pendiente | Intercepto | R² |
+   |---|---|---|---|
+   | Ataque  | +0,2842 | +0,0258 | 0,505 |
+   | Defensa | −0,2056 | −0,0740 | 0,393 |
+
+   El signo es el esperado en ambos: más valor de plantilla → más ataque y
+   mejor defensa (recuerda que en este modelo defensa < 1 es bueno). La
+   plantilla explica una parte real del rendimiento — no toda: R² de 0,4-0,5,
+   no 0,9.
+
+2. **¿Cuánto debe pesar frente al rating histórico?** Barrido del peso de
+   mezcla en el mismo backtest jornada a jornada:
+
+   | Peso | RPS | | Peso | RPS |
+   |---|---|---|---|---|
+   | 0,00 | 0,2004 | | 0,20 | 0,2003 |
+   | 0,05 | 0,2003 | | 0,25 | 0,2004 |
+   | 0,10 | 0,2003 | | 0,30 | 0,2005 |
+   | **0,15** | **0,2002** | | 0,40 | 0,2009 |
+
+   Curva en U con pico en 0,10-0,15: mejora real pero modesta (log-loss
+   0,9755 → 0,9751), justo lo que cabe esperar de una señal que ya está
+   parcialmente contenida en la historia de un equipo con plantilla estable.
+
+**Dos fuentes distintas según la fecha.** `player_valuations.csv` (la serie
+histórica de valoraciones) se corta en marzo de 2026, antes de que cerrara el
+mercado de verano el 31 de agosto. Sirve para calibrar sobre temporadas
+pasadas (`squad_value_at`), pero no para la temporada 2026/27 en sí. Para eso
+se usa `current_squad_value`, que lee el club y valor **actuales** de cada
+jugador en `players.csv` — el único fichero del repositorio que refleja los
+fichajes ya cerrados.
+
+**A diferencia de los defaults de ascendidos**, que sólo corrigen a equipos
+sin historia, el prior de plantilla se aplica a los 20 equipos con dato de
+Transfermarkt: un equipo con mucha historia pero una plantilla muy reforzada
+este verano también debe moverse. Coventry, sin `tm_club_id` en
+`team_names.csv`, queda fuera y se apoya sólo en el default de ascendido.
 
 ### Equipos ascendidos en 2026/27
 

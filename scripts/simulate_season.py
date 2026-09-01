@@ -27,8 +27,9 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.ratings import apply_defaults, fit_ratings
+from src.ratings import apply_defaults, apply_squad_prior, fit_ratings
 from src.simulator import export_results, predict_fixtures, simulate_season
+from src.squad import current_squad_value
 from src.utils import (RESULTS_DIR, load_fixtures, load_matches,
                        load_teams_2026_27, logger)
 
@@ -43,6 +44,9 @@ def build_ratings(args):
                     prior_strength=args.prior, verbose=True)
     if not args.no_defaults:
         r = apply_defaults(r, teams=list(teams["canonical"]), verbose=args.verbose)
+    if not args.no_squad_prior:
+        sv = current_squad_value(teams=list(teams["canonical"]))
+        r = apply_squad_prior(r, sv, verbose=args.verbose)
     return r
 
 
@@ -84,6 +88,8 @@ def main():
                    help="CSV de partidos ya jugados: home, away, home_goals, away_goals")
     p.add_argument("--no-defaults", action="store_true",
                    help="No aplicar el prior de equipos ascendidos")
+    p.add_argument("--no-squad-prior", action="store_true",
+                   help="No aplicar el prior de valor de plantilla (fichajes)")
     p.add_argument("--save-raw", action="store_true",
                    help="Guardar también los puntos de cada simulación")
     p.add_argument("--verbose", action="store_true")
