@@ -37,7 +37,7 @@ adaptado de formato copa a formato liga.
 - [x] Simulación condicionada a resultados ya jugados
 - [x] Features de plantilla y fichajes
 - [x] Feature de congestión de calendario — medida y descartada, ver más abajo
-- [ ] Predicciones individuales (Bota de Oro, asistencias)
+- [x] Predicciones individuales (Bota de Oro, asistencias)
 
 ---
 
@@ -148,6 +148,24 @@ Ejemplo del efecto — Arsenal perdiendo sus 5 primeros partidos:
 | Arsenal, top-4 | 96,9% | 71,3% |
 | Man City, título | 42,8% | 67,5% |
 
+### Paso 4 — Predicciones individuales
+
+```bash
+python scripts/predict_players.py
+```
+
+Necesita `data/raw/appearances.csv` (ver Fuentes de datos). Reparte los goles de cada
+simulación de equipo entre los jugadores de su plantilla según su cuota histórica de
+goles/asistencias, y da la probabilidad de Bota de Oro y máximo asistente de cada
+jugador — no un modelo de goles por jugador independiente, ver la nota metodológica
+más abajo.
+
+| Opción | Efecto |
+|---|---|
+| `--sims 50000` | Número de temporadas simuladas (igual que en `simulate_season.py`) |
+| `--played fichero.csv` | Incorporar resultados ya disputados |
+| `--top 30` | Filas a mostrar de cada tabla |
+
 ---
 
 ## Ficheros de resultados
@@ -161,6 +179,7 @@ Todo se escribe en `results/`, que está en `.gitignore`.
 | `position_matrix.csv` | 20×20 | P(cada equipo termine en cada puesto) — ideal para un heatmap |
 | `points_distribution.csv` | 400 | Histograma de puntos finales por equipo |
 | `raw_points.csv` | n_sims | Sólo con `--save-raw`. Puntos de cada simulación, para análisis propios |
+| `player_predictions.csv` | ~785 | Uno por jugador con historial en Premier: goles/asistencias medios, P10/P90, P(Bota de Oro), P(máximo asistente). Genera `predict_players.py` |
 
 ---
 
@@ -211,6 +230,18 @@ jugados = pd.read_csv("results/jugados.csv")
 res = simulate_season(r, fixtures, played=jugados, n_sims=20_000)
 ```
 
+Bota de Oro y máximo asistente, a partir de una simulación ya hecha:
+
+```python
+from src.players import load_appearances, player_shares, simulate_player_stats
+
+appearances = load_appearances()
+shares = player_shares(appearances, as_of="2026-08-21", teams=list(teams["canonical"]))
+jugadores = simulate_player_stats(res, shares)
+
+print(jugadores.sort_values("p_bota_oro", ascending=False).head(10))
+```
+
 ---
 
 ## Estructura
@@ -227,6 +258,7 @@ Prediccion_Premier_2627/
 │   │   ├── player_valuations.csv             # valores de mercado con histórico
 │   │   ├── transfers.csv                     # movimientos de fichajes
 │   │   ├── players.csv                       # metadatos de jugadores
+│   │   ├── appearances.csv                   # goles/asistencias por partido — no en git, ver abajo
 │   │   └── competitions.csv                  # códigos de competición
 │   └── processed/                            # generado — en .gitignore
 ├── src/                                      # librería
@@ -235,13 +267,16 @@ Prediccion_Premier_2627/
 │   ├── ratings.py                            # motor Dixon-Coles
 │   ├── squad.py                              # valor de plantilla (Transfermarkt)
 │   ├── congestion.py                         # descanso entre partidos, todas las competiciones
+│   ├── players.py                            # reparto de goles/asistencias por jugador
 │   └── simulator.py                          # Monte Carlo y exportación
 ├── scripts/                                  # ejecutables
 │   ├── download_footballdata.py              # ingesta reproducible
 │   ├── backtest_ratings.py                   # validación del motor
 │   ├── calibrate_squad_prior.py              # calibración del prior de plantilla
 │   ├── calibrate_congestion.py               # calibración (descartada) de la fatiga
-│   └── simulate_season.py                    # predicción de la temporada
+│   ├── calibrate_players.py                  # calibración del reparto de goles
+│   ├── simulate_season.py                    # predicción de la temporada
+│   └── predict_players.py                    # Bota de Oro y máximo asistente
 ├── models/                                   # en .gitignore
 ├── results/                                  # en .gitignore
 ├── requirements.txt
@@ -259,6 +294,7 @@ otros módulos importan; `simulate_season.py` es lo que se lanza desde la termin
 | `ratings.py` | **Modelado.** `fit_ratings()` ajusta ataque, defensa y ventaja de local; `apply_defaults()` corrige equipos sin historia; `apply_squad_prior()` mezcla el rating con el valor de plantilla; `predict_match()` da probabilidades 1X2 |
 | `squad.py` | **Plantillas.** `squad_value_at()` valor de plantilla histórico (player_valuations.csv); `current_squad_value()` valor actual, post-fichajes (players.csv) |
 | `congestion.py` | **Calendario.** `rest_days()`/`matches_in_window()` descanso y carga reciente de un equipo, contando todas las competiciones de club (games.csv) |
+| `players.py` | **Jugadores.** `player_shares()` cuota histórica de goles/asistencias de cada jugador sobre su equipo; `simulate_player_stats()` reparte los goles de cada simulación de equipo entre su plantilla |
 | `simulator.py` | **Simulación.** `predict_fixtures()` analítico por partido; `simulate_season()` Monte Carlo agregado; `export_results()` vuelca a CSV |
 
 ---
@@ -486,6 +522,51 @@ Una liga de 38 jornadas tiene muchísimo ruido. Con una sola simulación el resu
 prácticamente aleatorio. El mínimo utilizable son **5.000 temporadas**; el valor por
 defecto es 20.000 y sigue tardando poco más de un segundo.
 
+### Predicciones individuales: reparto, no un modelo de jugador aparte
+
+`src/players.py` no predice goles de un jugador de forma independiente -exigiría
+minutos y titularidades futuras, que no están en los datos-. En vez de eso REPARTE lo
+que `simulate_season()` ya genera: para cada una de las n_sims temporadas simuladas,
+toma los goles totales del equipo (`res.goals_for`) y los sortea entre su plantilla con
+un multinomial ponderado por la cuota histórica de cada jugador
+(`goles_del_jugador / goles_del_equipo`, ponderada por recencia). Las asistencias salen
+igual, escalando los goles de equipo por `ASSISTS_PER_GOAL = 0,792` (asistencias/goles
+medido sobre las 147.550 apariciones de Premier de `appearances.csv`, 2012/13-2025/26).
+
+**Validado con una pregunta de ranking, no de probabilidad.** Los otros calibradores de
+este proyecto usan log-loss/RPS porque predicen la probabilidad de un resultado
+concreto; aquí la pregunta es "¿quién marca más?", así que la métrica es acierto simple
+(hit-rate): tomando sólo información anterior a cada temporada (2016/17-2025/26),
+¿el jugador con más cuota histórica de goles de su equipo es su máximo goleador real
+esa temporada? `scripts/calibrate_players.py` barre la vida media del peso temporal:
+
+| Vida media | Acierto | | Vida media | Acierto |
+|---|---|---|---|---|
+| 180 d | 34,2% | | 545 d | 34,2% |
+| 270 d | **36,3%** | | 730 d | 33,7% |
+| 365 d | 34,7% | | | |
+
+Sobre 190 equipo-temporada, sin ningún pico claro (33,7%-36,3%): a diferencia de la
+vida media de `ratings.py`, aquí la elección de vida media importa poco. **Referencias:**
+elegir al azar entre una plantilla de ~20 con minutos relevantes acertaría el 5,0%; el
+modelo, con 270 días, el 36,3% — siete veces mejor que el azar, una señal real. Pero
+**repetir sin más el goleador de la temporada anterior acierta el 36,6%**, prácticamente
+empatado con el modelo en esta métrica concreta.
+
+Eso no vacía de sentido el reparto por cuota: a diferencia de "repetir el goleador
+anterior" -que no tiene respuesta cuando ese jugador se ha ido o el equipo acaba de
+ascender (cobertura de sólo 153 equipo-temporada frente a 190)-, el modelo cubre
+cualquier plantilla con historial, se ajusta automáticamente a fichajes y da una
+distribución de probabilidad completa por jugador, no una única apuesta. Pero para la
+pregunta estrecha de "quién es el número 1", esta calibración no encontró ventaja clara
+sobre la referencia más simple posible, y así se reporta.
+
+**Limitación conocida:** la cuota de cada jugador es fija dentro de las n_sims
+simulaciones -sólo varía cuánto marca el equipo, no cómo se reparte dentro de él-, así
+que las probabilidades de Bota de Oro están algo más ajustadas de lo que sería una
+predicción con toda la incertidumbre real (lesiones, rotación, un fichaje de invierno)
+incorporada.
+
 ---
 
 ## Temporada 2026/27
@@ -508,11 +589,15 @@ Arsenal defiende el título.
 | Dataset | Fuente | Contenido |
 |---|---|---|
 | `epl_matches.csv` | football-data.co.uk vía datahub | Resultados, tiros, córners, tarjetas |
-| `games.csv`, `players.csv`, `transfers.csv`, `player_valuations.csv` | [Transfermarkt / Kaggle](https://www.kaggle.com/datasets/davidcariboo/player-scores) | Partidos de club, plantillas, valores de mercado |
+| `games.csv`, `players.csv`, `transfers.csv`, `player_valuations.csv`, `appearances.csv` | [Transfermarkt / Kaggle](https://www.kaggle.com/datasets/davidcariboo/player-scores) | Partidos de club, plantillas, valores de mercado, goles/asistencias por partido |
 | `premier-league-gb-eng_2026-27.csv` | Calendario oficial | 380 fixtures de la temporada |
 
-`appearances.csv` (140 MB) no está en el repositorio por tamaño. Descárgalo del mismo
-dataset de Kaggle si vas a usar el módulo de predicciones individuales.
+`appearances.csv` (140 MB, 1,86M apariciones) no está en el repositorio por tamaño —
+sigue en `.gitignore`, hace falta para `src/players.py` y no viene incluido al clonar.
+Descárgalo del mismo dataset de Kaggle y colócalo en `data/raw/appearances.csv`. Si
+Kaggle no es accesible desde donde ejecutes esto, una alternativa es subirlo como
+adjunto binario a un [Release de GitHub](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
+(hasta 2GB por archivo, sin las limitaciones de tamaño de git) y descargarlo desde ahí.
 
 ---
 
