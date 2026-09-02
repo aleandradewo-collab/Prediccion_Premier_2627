@@ -39,6 +39,7 @@ import pandas as pd
 from scipy.optimize import minimize_scalar
 from scipy.stats import poisson
 
+from src.congestion import NORMAL_REST_DAYS
 from src.utils import logger
 
 # ── Parámetros por defecto ────────────────────────────────────────────────────
@@ -74,6 +75,37 @@ DEFAULT_DEFENSE = 1.196
 # Por debajo, se mezcla proporcionalmente con el default.
 # Referencia: un equipo con temporada completa reciente ronda 31.
 FULL_WEIGHT     = 25.0
+
+# ── Prior de valor de plantilla ───────────────────────────────────────────────
+# Medido en scripts/calibrate_squad_prior.py, no inventado: regresión de
+# log(attack)/log(defense) contra el valor de mercado de la plantilla
+# (relativo a la media de la liga esa temporada), sobre 220 equipo-temporada
+# de 2015/16 a 2025/26. R²=0.505 en ataque, R²=0.393 en defensa: la plantilla
+# explica una parte real del rendimiento, no toda.
+#
+# SQUAD_PRIOR_WEIGHT es el peso de mezcla con el rating histórico que minimiza
+# el RPS en el mismo backtest jornada a jornada (0.2004 -> 0.2002). Curva en
+# U con pico en 0.10-0.15: mejora real pero modesta, ver README.
+SQUAD_ATTACK_SLOPE       = 0.2842
+SQUAD_ATTACK_INTERCEPT   = 0.0258
+SQUAD_DEFENSE_SLOPE      = -0.2056
+SQUAD_DEFENSE_INTERCEPT  = -0.0740
+SQUAD_PRIOR_WEIGHT       = 0.15
+
+# ── Congestión de calendario ──────────────────────────────────────────────────
+# Medido en scripts/calibrate_congestion.py y DESCARTADO, igual que tau: se
+# probaron dos formas de medir la fatiga (déficit de descanso desde el último
+# partido de club, y partidos jugados en los últimos 10 días, ambas contando
+# TODAS las competiciones vía games.csv) y ninguna mejora el backtest jornada
+# a jornada — RPS 0.2004 con y sin ajuste en las dos. El coeficiente por
+# máxima verosimilitud sale casi cero y sin el signo esperado en ambos casos.
+#
+# Conclusión honesta, no la que se esperaba: a nivel de Premier League no hay
+# un efecto de fatiga detectable con esta especificación. El mecanismo queda
+# implementado (fatigue_multiplier, src/congestion.py) por si esto cambia con
+# más temporadas o una medida distinta de carga; mientras tanto, coef=0 lo
+# deja inerte. Ver README para la comparación completa.
+CONGESTION_COEF = 0.0
 
 
 @dataclass
@@ -334,15 +366,111 @@ def apply_defaults(
     )
 
 
+# ── Prior de valor de plantilla ───────────────────────────────────────────────
+def set_squad_prior_coeffs(attack_slope: float, attack_intercept: float,
+                           defense_slope: float, defense_intercept: float) -> None:
+    """Sobrescribe los coeficientes medidos. Usado por calibrate_squad_prior.py
+    para evaluar el barrido de pesos sin tener que editar este fichero."""
+    global SQUAD_ATTACK_SLOPE, SQUAD_ATTACK_INTERCEPT
+    global SQUAD_DEFENSE_SLOPE, SQUAD_DEFENSE_INTERCEPT
+    SQUAD_ATTACK_SLOPE, SQUAD_ATTACK_INTERCEPT = attack_slope, attack_intercept
+    SQUAD_DEFENSE_SLOPE, SQUAD_DEFENSE_INTERCEPT = defense_slope, defense_intercept
+
+
+def implied_rating_from_value(value) -> tuple[dict, dict]:
+    """
+    Attack/defense implícitos por el valor de plantilla, según la regresión
+    medida en scripts/calibrate_squad_prior.py.
+
+    `value` es una Series equipo -> valor de plantilla en euros. Se normaliza
+    contra la media de la propia serie: lo que importa es el valor RELATIVO
+    al resto de la liga esa temporada, no el número absoluto (que sube con la
+    inflación del mercado de fichajes de un año para otro).
+    """
+    log_rel = np.log(value / value.mean())
+    attack = np.exp(SQUAD_ATTACK_INTERCEPT + SQUAD_ATTACK_SLOPE * log_rel)
+    defense = np.exp(SQUAD_DEFENSE_INTERCEPT + SQUAD_DEFENSE_SLOPE * log_rel)
+    return attack.to_dict(), defense.to_dict()
+
+
+def apply_squad_prior(ratings: Ratings, squad_value,
+                      weight: float = SQUAD_PRIOR_WEIGHT,
+                      verbose: bool = False) -> Ratings:
+    """
+    Mezcla el rating histórico con el implícito por el valor de plantilla.
+
+    A diferencia de apply_defaults() -que sólo corrige a equipos sin
+    historia-, esto ajusta a TODOS los equipos con dato de Transfermarkt: un
+    equipo con mucha historia pero una plantilla muy reforzada este verano
+    también debe moverse, aunque el rating Dixon-Coles todavía no lo sepa.
+
+    `weight` es el peso medido en el backtest (0 = ignora la plantilla,
+    1 = ignora la historia). Equipos sin dato de valor de plantilla
+    (p.ej. Coventry, sin tm_club_id) quedan sin tocar.
+    """
+    if weight <= 0:
+        return ratings
+
+    sv = squad_value.dropna()
+    if sv.empty:
+        return ratings
+
+    attack = dict(ratings.attack)
+    defense = dict(ratings.defense)
+    atk_impl, def_impl = implied_rating_from_value(sv)
+
+    ajustes = []
+    for t in sv.index:
+        if t not in attack:
+            continue
+        a0, d0 = attack[t], defense[t]
+        attack[t] = (1 - weight) * a0 + weight * atk_impl[t]
+        defense[t] = (1 - weight) * d0 + weight * def_impl[t]
+        ajustes.append((t, a0, attack[t], d0, defense[t]))
+
+    if verbose and ajustes:
+        logger.info(f"  prior de plantilla aplicado a {len(ajustes)} equipos (peso={weight}):")
+        for t, a0, a1, d0, d1 in ajustes:
+            logger.info(f"    {t:16s} atk {a0:.3f}->{a1:.3f}  def {d0:.3f}->{d1:.3f}")
+
+    return Ratings(
+        attack=attack, defense=defense,
+        home_adv=ratings.home_adv, mu=ratings.mu, rho=ratings.rho,
+        as_of=ratings.as_of, n_matches=ratings.n_matches, eff_weight=ratings.eff_weight,
+    )
+
+
 # ── Predicción ────────────────────────────────────────────────────────────────
+def fatigue_multiplier(rest: float | None) -> float:
+    """
+    Factor multiplicativo sobre los goles esperados de un equipo según su
+    descanso antes del partido.
+
+    `rest=None` (no hay dato de descanso, p.ej. games.csv no llega a esa
+    fecha) devuelve 1.0: sin información no hay penalización. Con descanso
+    igual o mayor que NORMAL_REST_DAYS tampoco hay penalización — más
+    descanso del normal no se premia, sólo se castiga el que falta.
+    """
+    if rest is None:
+        return 1.0
+    deficit = max(0.0, NORMAL_REST_DAYS - rest)
+    return float(np.exp(-CONGESTION_COEF * deficit))
+
+
 def predict_lambdas(ratings: Ratings, home: str, away: str,
-                    neutral: bool = False) -> tuple[float, float]:
+                    neutral: bool = False,
+                    rest_home: float | None = None,
+                    rest_away: float | None = None) -> tuple[float, float]:
     """
     Goles esperados de un enfrentamiento.
 
     Un equipo no presente en los ratings recibe los valores por defecto de
     ascendido, NO valores neutros: si no sabemos nada de un equipo, lo más
     probable es que venga de Segunda, no que sea de media tabla.
+
+    `rest_home`/`rest_away`: días de descanso antes de este partido, contando
+    TODAS las competiciones (ver src.congestion.rest_days). None si no hay
+    dato: el partido se predice igual que sin este módulo.
     """
     atk_h = ratings.attack.get(home, DEFAULT_ATTACK)
     def_h = ratings.defense.get(home, DEFAULT_DEFENSE)
@@ -350,9 +478,9 @@ def predict_lambdas(ratings: Ratings, home: str, away: str,
     def_a = ratings.defense.get(away, DEFAULT_DEFENSE)
     ha = 1.0 if neutral else ratings.home_adv
 
-    lh = float(np.clip(ratings.mu * atk_h * def_a * ha, LAMBDA_MIN, LAMBDA_MAX))
-    la = float(np.clip(ratings.mu * atk_a * def_h,      LAMBDA_MIN, LAMBDA_MAX))
-    return lh, la
+    lh = ratings.mu * atk_h * def_a * ha * fatigue_multiplier(rest_home)
+    la = ratings.mu * atk_a * def_h      * fatigue_multiplier(rest_away)
+    return float(np.clip(lh, LAMBDA_MIN, LAMBDA_MAX)), float(np.clip(la, LAMBDA_MIN, LAMBDA_MAX))
 
 
 def score_matrix(lh: float, la: float, rho: float = 0.0,
@@ -391,6 +519,9 @@ def match_probabilities(lh: float, la: float, rho: float = 0.0,
 
 def predict_match(ratings: Ratings, home: str, away: str, **kw) -> dict:
     """Atajo: ratings + equipos -> probabilidades."""
-    lh, la = predict_lambdas(ratings, home, away, neutral=kw.pop("neutral", False))
+    lh, la = predict_lambdas(ratings, home, away,
+                             neutral=kw.pop("neutral", False),
+                             rest_home=kw.pop("rest_home", None),
+                             rest_away=kw.pop("rest_away", None))
     return {"home": home, "away": away,
             **match_probabilities(lh, la, ratings.rho, **kw)}

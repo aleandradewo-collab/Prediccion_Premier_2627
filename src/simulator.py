@@ -36,6 +36,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.congestion import rest_days
 from src.ratings import Ratings, match_probabilities, predict_lambdas, score_matrix
 from src.utils import RESULTS_DIR, logger
 
@@ -45,7 +46,7 @@ RELEGATION_SPOTS = 3    # últimos 3 -> descienden
 
 # ── 1. Predicción partido a partido (analítica, sin Monte Carlo) ─────────────
 def predict_fixtures(ratings: Ratings, fixtures: pd.DataFrame,
-                     max_goals: int = 10) -> pd.DataFrame:
+                     max_goals: int = 10, date_index: dict | None = None) -> pd.DataFrame:
     """
     Probabilidades de cada partido del calendario, una fila por partido.
 
@@ -53,13 +54,23 @@ def predict_fixtures(ratings: Ratings, fixtures: pd.DataFrame,
     exacto, así que sirve tanto para los 380 partidos de la temporada como para
     una sola jornada.
 
+    `date_index`: si se pasa (ver src.congestion.team_date_index), se calcula
+    el descanso de cada equipo antes de SU fecha de partido y se penaliza la
+    fatiga. Sin él, se predice igual que sin este módulo.
+
     Columnas: date, matchday, home, away, lambda_home, lambda_away,
               p_home, p_draw, p_away, xpts_home, xpts_away,
               marcador más probable y su probabilidad.
     """
     rows = []
     for _, m in fixtures.iterrows():
-        lh, la = predict_lambdas(ratings, m["home"], m["away"])
+        rest_home = rest_away = None
+        if date_index is not None and pd.notna(m.get("date")):
+            rest_home = rest_days(date_index, m["home"], m["date"])
+            rest_away = rest_days(date_index, m["away"], m["date"])
+
+        lh, la = predict_lambdas(ratings, m["home"], m["away"],
+                                 rest_home=rest_home, rest_away=rest_away)
         p = match_probabilities(lh, la, ratings.rho, max_goals)
 
         mat = score_matrix(lh, la, ratings.rho, max_goals)
@@ -142,6 +153,7 @@ def simulate_season(
     n_sims: int = 20_000,
     seed: int | None = 42,
     max_goals: int = 12,
+    date_index: dict | None = None,
 ) -> SeasonResults:
     """
     Simula la temporada n_sims veces.
@@ -154,7 +166,9 @@ def simulate_season(
                   suman como base y sólo se simula lo que queda. Es lo que
                   permite recalcular probabilidades cada jornada durante la
                   temporada.
-        n_sims:   temporadas simuladas. Menos de 5.000 es ruido puro
+        n_sims:      temporadas simuladas. Menos de 5.000 es ruido puro
+        date_index:  ver src.congestion.team_date_index. Penaliza la fatiga de
+                     calendario en cada partido pendiente si se pasa.
     """
     teams = sorted(set(fixtures["home"]) | set(fixtures["away"]))
     idx = {t: i for i, t in enumerate(teams)}
@@ -193,7 +207,12 @@ def simulate_season(
     lam_h = np.empty(n_fix)
     lam_a = np.empty(n_fix)
     for i, (_, m) in enumerate(pend.iterrows()):
-        lam_h[i], lam_a[i] = predict_lambdas(ratings, m["home"], m["away"])
+        rest_home = rest_away = None
+        if date_index is not None and pd.notna(m.get("date")):
+            rest_home = rest_days(date_index, m["home"], m["date"])
+            rest_away = rest_days(date_index, m["away"], m["date"])
+        lam_h[i], lam_a[i] = predict_lambdas(ratings, m["home"], m["away"],
+                                             rest_home=rest_home, rest_away=rest_away)
 
     logger.info(f"  simulando {n_sims:,} temporadas · {n_fix} partidos pendientes"
                 + (f" · {n_played} ya jugados" if n_played else ""))
