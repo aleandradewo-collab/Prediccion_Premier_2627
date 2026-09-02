@@ -147,6 +147,11 @@ calendario, igual que `season_trajectory.py`- y ajustando el `--as-of` a esa fec
 la predicción completa, no sólo el resumen de título: clasificación, partidos, matriz
 de posiciones, todo anclado a esa jornada.
 
+Cada corrida con `--through N` archiva sus ficheros con el sufijo `_JN`
+(`season_predictions_J5.xlsx`, `season_probabilities_J5.csv`, etc.) en vez de pisar
+siempre los mismos nombres — así se acumula un Excel por jornada en `results/` y se
+puede comparar cómo cambió la predicción de una jornada a la siguiente.
+
 ```bash
 python scripts/simulate_season.py --through 5
 ```

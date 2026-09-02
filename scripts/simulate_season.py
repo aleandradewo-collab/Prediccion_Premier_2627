@@ -194,7 +194,8 @@ def main():
 
     print("\n  Ficheros generados:")
     pred = predict_fixtures(ratings, fixtures, date_index=date_index)
-    export_results(res, fixtures_pred=pred, save_raw=args.save_raw)
+    suffix = f"_J{args.through}" if args.through is not None else ""
+    export_results(res, fixtures_pred=pred, save_raw=args.save_raw, suffix=suffix)
 
     print(f"\n  Tiempo total: {time.time() - t0:.1f}s\n")
 

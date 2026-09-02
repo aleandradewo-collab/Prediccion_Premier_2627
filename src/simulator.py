@@ -279,12 +279,15 @@ def export_results(
     fixtures_pred: pd.DataFrame | None = None,
     outdir: Path | None = None,
     save_raw: bool = False,
+    suffix: str = "",
 ) -> dict[str, Path]:
     """
     Vuelca los resultados a CSV, y todo junto a un único Excel con una hoja
     por tabla (salvo raw_points, que sólo tiene sentido como CSV aparte).
 
-    Ficheros generados en results/:
+    Ficheros generados en results/ (con `suffix` insertado antes de la
+    extensión, p.ej. suffix="_J5" -> season_probabilities_J5.csv -- así una
+    corrida con --through no pisa la anterior, se archivan todas):
 
       season_probabilities.csv  tabla agregada, una fila por equipo
       match_predictions.csv     un partido por fila con sus probabilidades
@@ -300,27 +303,27 @@ def export_results(
     outdir.mkdir(parents=True, exist_ok=True)
     written = {}
 
-    p = outdir / "season_probabilities.csv"
+    p = outdir / f"season_probabilities{suffix}.csv"
     res.table.to_csv(p, index=False); written["season_probabilities"] = p
 
     position_matrix = res.position_matrix()
-    p = outdir / "position_matrix.csv"
+    p = outdir / f"position_matrix{suffix}.csv"
     position_matrix.to_csv(p); written["position_matrix"] = p
 
     points_distribution = res.points_distribution()
-    p = outdir / "points_distribution.csv"
+    p = outdir / f"points_distribution{suffix}.csv"
     points_distribution.to_csv(p, index=False); written["points_distribution"] = p
 
     if fixtures_pred is not None:
-        p = outdir / "match_predictions.csv"
+        p = outdir / f"match_predictions{suffix}.csv"
         fixtures_pred.to_csv(p, index=False); written["match_predictions"] = p
 
     if save_raw:
-        p = outdir / "raw_points.csv"
+        p = outdir / f"raw_points{suffix}.csv"
         pd.DataFrame(res.points, columns=res.teams).to_csv(p, index=False)
         written["raw_points"] = p
 
-    p = outdir / "season_predictions.xlsx"
+    p = outdir / f"season_predictions{suffix}.xlsx"
     with pd.ExcelWriter(p, engine="openpyxl") as xw:
         res.table.to_excel(xw, sheet_name="Clasificación", index=False)
         if fixtures_pred is not None:
