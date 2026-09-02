@@ -166,6 +166,56 @@ más abajo.
 | `--played fichero.csv` | Incorporar resultados ya disputados |
 | `--top 30` | Filas a mostrar de cada tabla |
 
+### Paso 5 — Mantener los resultados al día
+
+```bash
+python scripts/update_current_season.py
+```
+
+Refresca **sólo** la temporada en curso en `epl_matches.csv`, directo de football-data.co.uk
+(no del espejo de `datasets/football-datasets` que usa `download_footballdata.py`, que
+puede tardar en sincronizar mientras la temporada está en marcha). Aborta sin tocar nada
+si las fechas no parsean o si la descarga trae menos partidos de los que ya había
+guardados — nunca sobrescribe con menos datos en silencio.
+
+> **No verificado en vivo.** El entorno donde se desarrolló este proyecto tiene
+> bloqueado el acceso a football-data.co.uk por política de red, así que este script no
+> se ha podido probar contra el sitio real desde aquí — sólo su lógica de fusión, con
+> datos sintéticos. El patrón de URL y el formato de columnas son estables desde hace
+> años, pero antes de confiar en él conviene ejecutarlo una vez a mano y revisar el
+> resultado.
+
+Hay un workflow de GitHub Actions (`.github/workflows/update_results.yml`) que lo
+ejecuta a diario y hace commit si hay cambios — corre en la infraestructura de GitHub,
+que sí tiene salida a internet. **Tampoco verificado en vivo** por el mismo motivo;
+disparalo a mano una vez (pestaña *Actions* → *Actualizar resultados de la temporada en
+curso* → *Run workflow*) antes de confiar en el cron. Necesita que el repositorio tenga
+permiso de escritura para `GITHUB_TOKEN` (*Settings → Actions → General → Workflow
+permissions → Read and write*).
+
+### Paso 6 — Cómo evolucionan las probabilidades en la temporada
+
+```bash
+python scripts/season_trajectory.py
+```
+
+Simula la temporada tal como se veía **en cada jornada**, desde la 0 (pretemporada)
+hasta la última con resultados reales cargados: para la jornada N usa como partidos ya
+jugados sólo los que de verdad se disputaron hasta ahí (detectados automáticamente
+cruzando el calendario con `epl_matches.csv`, sin mantener ningún CSV a mano) y simula
+el resto. Guarda todas las jornadas juntas en `results/title_trajectory.csv` — pensado
+para graficarlo en Excel o donde prefieras y ver cómo sube o baja el título de cada
+equipo con cada resultado.
+
+Mientras `epl_matches.csv` no tenga partidos de 2026/27 (ver Paso 5), todas las
+jornadas devuelven la misma proyección de pretemporada — no es un error, es que
+todavía no hay ningún resultado real que incorporar.
+
+| Opción | Efecto |
+|---|---|
+| `--to 10` | Sólo hasta la jornada 10 |
+| `--sims 5000` | Simulaciones por jornada (default ya es 5.000, para que 39 jornadas no tarden minutos) |
+
 ---
 
 ## Ficheros de resultados
@@ -180,6 +230,7 @@ Todo se escribe en `results/`, que está en `.gitignore`.
 | `points_distribution.csv` | 400 | Histograma de puntos finales por equipo |
 | `raw_points.csv` | n_sims | Sólo con `--save-raw`. Puntos de cada simulación, para análisis propios |
 | `player_predictions.csv` | ~785 | Uno por jugador con historial en Premier: goles/asistencias medios, P10/P90, P(Bota de Oro), P(máximo asistente). Genera `predict_players.py` |
+| `title_trajectory.csv` | 20 × jornadas | Probabilidades de título/top-4/descenso de cada equipo, una vez por jornada simulada. Genera `season_trajectory.py` |
 
 ---
 
@@ -276,7 +327,11 @@ Prediccion_Premier_2627/
 │   ├── calibrate_congestion.py               # calibración (descartada) de la fatiga
 │   ├── calibrate_players.py                  # calibración del reparto de goles
 │   ├── simulate_season.py                    # predicción de la temporada
-│   └── predict_players.py                    # Bota de Oro y máximo asistente
+│   ├── predict_players.py                    # Bota de Oro y máximo asistente
+│   ├── update_current_season.py              # refresco directo de football-data.co.uk
+│   └── season_trajectory.py                  # probabilidades jornada a jornada
+├── .github/workflows/
+│   └── update_results.yml                    # cron diario para update_current_season.py
 ├── models/                                   # en .gitignore
 ├── results/                                  # en .gitignore
 ├── requirements.txt
