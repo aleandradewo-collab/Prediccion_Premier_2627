@@ -130,6 +130,24 @@ def load_teams_2026_27(path: Path | None = None) -> pd.DataFrame:
     return df
 
 
+def matches_played_through(fixtures: pd.DataFrame, season_matches: pd.DataFrame,
+                           matchday: int) -> pd.DataFrame:
+    """
+    Partidos de `fixtures` con matchday <= N cuyo resultado real ya está en
+    `season_matches` (subconjunto de una temporada de load_matches(), p.ej.
+    matches[matches.season == "2026-27"]).
+
+    Cruce por home/away: ambos usan la nomenclatura canónica de
+    team_names.csv, así que no hace falta traducir nada. Es lo que permite
+    detectar automáticamente qué se ha jugado de una jornada sin mantener un
+    CSV de resultados a mano — usado por simulate_season.py (--through) y
+    season_trajectory.py.
+    """
+    upto = fixtures.loc[fixtures["matchday"] <= matchday, ["home", "away"]]
+    real = season_matches[["home", "away", "home_goals", "away_goals"]]
+    return upto.merge(real, on=["home", "away"], how="inner")
+
+
 def league_table(matches: pd.DataFrame) -> pd.DataFrame:
     """
     Clasificación a partir de un DataFrame de partidos jugados.

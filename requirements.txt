@@ -16,6 +16,7 @@ seaborn>=0.12.0
 
 # ── Utilidades ────────────────────────────────────────────────────────────────
 tqdm>=4.66.0          # barras de progreso en las simulaciones Monte Carlo
+openpyxl>=3.1.0        # exportar resultados a Excel (season_trajectory.py, export_results)
 
 # ── Opcional: xG y cuotas ─────────────────────────────────────────────────────
 # Descomentar cuando añadamos el bloque de xG (Understat/FBref) y las cuotas

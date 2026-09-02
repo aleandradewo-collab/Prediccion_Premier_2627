@@ -279,17 +279,22 @@ def export_results(
     fixtures_pred: pd.DataFrame | None = None,
     outdir: Path | None = None,
     save_raw: bool = False,
+    suffix: str = "",
 ) -> dict[str, Path]:
     """
-    Vuelca los resultados a CSV.
+    Vuelca los resultados a CSV, y todo junto a un único Excel con una hoja
+    por tabla (salvo raw_points, que sólo tiene sentido como CSV aparte).
 
-    Ficheros generados en results/:
+    Ficheros generados en results/ (con `suffix` insertado antes de la
+    extensión, p.ej. suffix="_J5" -> season_probabilities_J5.csv -- así una
+    corrida con --through no pisa la anterior, se archivan todas):
 
       season_probabilities.csv  tabla agregada, una fila por equipo
       match_predictions.csv     un partido por fila con sus probabilidades
       position_matrix.csv       P(equipo termine en puesto N), 20x20
       points_distribution.csv   histograma de puntos finales por equipo
       raw_points.csv            (opcional) puntos crudos de cada simulación
+      season_predictions.xlsx   las cuatro tablas de arriba, una por hoja
 
     `raw_points.csv` sólo con save_raw=True: con 20.000 simulaciones son 20.000
     filas × 20 columnas, útil para análisis propios pero pesado.
@@ -298,25 +303,36 @@ def export_results(
     outdir.mkdir(parents=True, exist_ok=True)
     written = {}
 
-    p = outdir / "season_probabilities.csv"
+    p = outdir / f"season_probabilities{suffix}.csv"
     res.table.to_csv(p, index=False); written["season_probabilities"] = p
 
-    p = outdir / "position_matrix.csv"
-    res.position_matrix().to_csv(p); written["position_matrix"] = p
+    position_matrix = res.position_matrix()
+    p = outdir / f"position_matrix{suffix}.csv"
+    position_matrix.to_csv(p); written["position_matrix"] = p
 
-    p = outdir / "points_distribution.csv"
-    res.points_distribution().to_csv(p, index=False); written["points_distribution"] = p
+    points_distribution = res.points_distribution()
+    p = outdir / f"points_distribution{suffix}.csv"
+    points_distribution.to_csv(p, index=False); written["points_distribution"] = p
 
     if fixtures_pred is not None:
-        p = outdir / "match_predictions.csv"
+        p = outdir / f"match_predictions{suffix}.csv"
         fixtures_pred.to_csv(p, index=False); written["match_predictions"] = p
 
     if save_raw:
-        p = outdir / "raw_points.csv"
+        p = outdir / f"raw_points{suffix}.csv"
         pd.DataFrame(res.points, columns=res.teams).to_csv(p, index=False)
         written["raw_points"] = p
 
+    p = outdir / f"season_predictions{suffix}.xlsx"
+    with pd.ExcelWriter(p, engine="openpyxl") as xw:
+        res.table.to_excel(xw, sheet_name="Clasificación", index=False)
+        if fixtures_pred is not None:
+            fixtures_pred.to_excel(xw, sheet_name="Partidos", index=False)
+        position_matrix.to_excel(xw, sheet_name="Matriz posiciones")
+        points_distribution.to_excel(xw, sheet_name="Distribución puntos", index=False)
+    written["season_predictions_xlsx"] = p
+
     for nombre, ruta in written.items():
-        logger.info(f"  {nombre:<22} -> {ruta}")
+        logger.info(f"  {nombre:<24} -> {ruta}")
 
     return written
