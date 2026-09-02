@@ -1,0 +1,46 @@
+name: Actualizar resultados de la temporada en curso
+
+# Refresca data/raw/epl_matches.csv con los resultados de la temporada 2026/27
+# directo de football-data.co.uk. Corre en la infraestructura de GitHub, que
+# sí tiene salida a internet — a diferencia del entorno de desarrollo de este
+# proyecto, donde ese acceso está bloqueado por política de red.
+#
+# NO VERIFICADO EN VIVO. Antes de confiar en el cron, dispara este workflow a
+# mano una vez (pestaña Actions -> Actualizar resultados... -> Run workflow) y
+# revisa que el commit generado tenga los resultados esperados.
+
+"on":
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC todos los días
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias mínimas
+        run: pip install pandas requests
+
+      - name: Descargar temporada en curso
+        run: python scripts/update_current_season.py --season 2026
+
+      - name: Commit si hay cambios
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/raw/epl_matches.csv
+          if git diff --cached --quiet; then
+            echo "Sin cambios en epl_matches.csv"
+          else
+            git commit -m "Actualizar resultados temporada 2026/27 [automated]"
+            git push
+          fi
