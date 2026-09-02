@@ -51,6 +51,42 @@ python -m pip install -r requirements.txt
 
 ---
 
+## Pipeline completo (referencia rápida)
+
+Cada paso está explicado en detalle más abajo — esto es sólo la secuencia para
+copiar y pegar. Los pasos 5-7 son independientes entre sí, en cualquier orden.
+
+```bash
+# 1. Dependencias
+python -m pip install -r requirements.txt
+
+# 2. appearances.csv en data/raw/ (no viene en el repo, ver Fuentes de datos)
+#    Sólo hace falta para el paso 6 (predicciones individuales).
+
+# 3. Refrescar resultados de la temporada en curso
+python scripts/update_current_season.py
+#    (o, si ya está fusionado a main, disparar el workflow de GitHub Actions
+#    y hacer `git pull` después — ver Paso 2)
+
+# 4. (Opcional) Validar que el motor sigue sano
+python scripts/backtest_ratings.py
+
+# 5. Predicción completa de la temporada
+python scripts/simulate_season.py
+#    o anclada a una jornada concreta, con lo ya jugado hasta ahí:
+python scripts/simulate_season.py --through 5
+
+# 6. Predicciones individuales (Bota de Oro, asistencias)
+python scripts/predict_players.py
+
+# 7. Cómo evolucionan las probabilidades jornada a jornada
+python scripts/season_trajectory.py
+```
+
+Resultados en `results/` (CSV y Excel, `.gitignore`).
+
+---
+
 ## Ejecutar el modelo
 
 ### Paso 1 — Ingesta de datos
@@ -71,10 +107,34 @@ tiene 380 partidos.
 | `--to-season 2027` | Última temporada a intentar (omite las inexistentes) |
 | `--out ruta.csv` | Cambiar el destino |
 
-**Durante la temporada 2026/27 basta con reejecutarlo** para incorporar las jornadas
-nuevas. El resto de ficheros de `data/raw/` son estáticos y ya están en el repositorio.
+Es una ingesta completa desde cero: pensado para la primera vez, o para refrescar
+todo el histórico. **Durante la temporada 2026/27, para incorporar sólo las jornadas
+nuevas usa el Paso 2** — es más rápido y va directo a la fuente sin pasar por el espejo.
+El resto de ficheros de `data/raw/` son estáticos y ya están en el repositorio.
 
-### Paso 2 — Validar el motor de ratings
+### Paso 2 — Mantener los resultados al día
+
+```bash
+python scripts/update_current_season.py
+```
+
+Refresca **sólo** la temporada en curso en `epl_matches.csv`, directo de football-data.co.uk
+(no del espejo de `datasets/football-datasets` que usa el Paso 1, que puede tardar en
+sincronizar mientras la temporada está en marcha). Aborta sin tocar nada si las fechas no
+parsean o si la descarga trae menos partidos de los que ya había guardados — nunca
+sobrescribe con menos datos en silencio.
+
+**Verificado en producción**: hay un workflow de GitHub Actions
+(`.github/workflows/update_results.yml`) que lo ejecuta a diario y hace commit si hay
+cambios — corre en la infraestructura de GitHub, que tiene salida a internet (a
+diferencia del entorno donde se desarrolló este script, que la tiene bloqueada por
+política de red, así que no pudo probarse ahí). Ya corrió solo y trajo resultados reales
+de la temporada 2026/27 sin intervención. Si nunca lo disparaste a mano, hazlo una vez
+(pestaña *Actions* → *Actualizar resultados de la temporada en curso* → *Run workflow*)
+para confirmar que sigue funcionando en tu repo. Necesita permiso de escritura para
+`GITHUB_TOKEN` (*Settings → Actions → General → Workflow permissions → Read and write*).
+
+### Paso 3 — Validar el motor de ratings
 
 ```bash
 python scripts/backtest_ratings.py            # métricas del modelo
@@ -92,7 +152,7 @@ de empates. Es el fichero que dice si un cambio mejora de verdad o solo lo parec
 | `--prior 4` | Encogimiento hacia la media de la liga |
 | `--sweep` | Barrido de vidas medias con comparativa |
 
-### Paso 3 — Predecir la temporada
+### Paso 4 — Predecir la temporada
 
 ```bash
 python scripts/simulate_season.py
@@ -171,7 +231,7 @@ Ejemplo del efecto — Arsenal perdiendo sus 5 primeros partidos:
 | Arsenal, top-4 | 96,9% | 71,3% |
 | Man City, título | 42,8% | 67,5% |
 
-### Paso 4 — Predicciones individuales
+### Paso 5 — Predicciones individuales
 
 ```bash
 python scripts/predict_players.py
@@ -189,33 +249,6 @@ más abajo.
 | `--played fichero.csv` | Incorporar resultados ya disputados |
 | `--top 30` | Filas a mostrar de cada tabla |
 
-### Paso 5 — Mantener los resultados al día
-
-```bash
-python scripts/update_current_season.py
-```
-
-Refresca **sólo** la temporada en curso en `epl_matches.csv`, directo de football-data.co.uk
-(no del espejo de `datasets/football-datasets` que usa `download_footballdata.py`, que
-puede tardar en sincronizar mientras la temporada está en marcha). Aborta sin tocar nada
-si las fechas no parsean o si la descarga trae menos partidos de los que ya había
-guardados — nunca sobrescribe con menos datos en silencio.
-
-> **No verificado en vivo.** El entorno donde se desarrolló este proyecto tiene
-> bloqueado el acceso a football-data.co.uk por política de red, así que este script no
-> se ha podido probar contra el sitio real desde aquí — sólo su lógica de fusión, con
-> datos sintéticos. El patrón de URL y el formato de columnas son estables desde hace
-> años, pero antes de confiar en él conviene ejecutarlo una vez a mano y revisar el
-> resultado.
-
-Hay un workflow de GitHub Actions (`.github/workflows/update_results.yml`) que lo
-ejecuta a diario y hace commit si hay cambios — corre en la infraestructura de GitHub,
-que sí tiene salida a internet. **Tampoco verificado en vivo** por el mismo motivo;
-disparalo a mano una vez (pestaña *Actions* → *Actualizar resultados de la temporada en
-curso* → *Run workflow*) antes de confiar en el cron. Necesita que el repositorio tenga
-permiso de escritura para `GITHUB_TOKEN` (*Settings → Actions → General → Workflow
-permissions → Read and write*).
-
 ### Paso 6 — Cómo evolucionan las probabilidades en la temporada
 
 ```bash
@@ -227,7 +260,7 @@ hasta la última con resultados reales cargados: para la jornada N usa como part
 jugados sólo los que de verdad se disputaron hasta ahí (detectados automáticamente
 cruzando el calendario con `epl_matches.csv`, sin mantener ningún CSV a mano) y simula
 el resto. Para la predicción COMPLETA de una única jornada -no sólo el título, también
-partidos y matriz de posiciones- usa `simulate_season.py --through N` (Paso 3).
+partidos y matriz de posiciones- usa `simulate_season.py --through N` (Paso 4).
 
 Guarda todas las jornadas en `results/title_trajectory.csv` (formato largo, una fila
 por equipo y jornada) y en `results/title_trajectory.xlsx`, con una hoja adicional por
@@ -235,7 +268,7 @@ cada métrica (`P(título)`, `P(top-4)`, `P(descenso)`, `Puntos medios`) ya pivo
 jornada × equipo — selecciona el rango en Excel e inserta un gráfico de líneas
 directamente, sin tener que armar la tabla dinámica.
 
-Mientras `epl_matches.csv` no tenga partidos de 2026/27 (ver Paso 5), todas las
+Mientras `epl_matches.csv` no tenga partidos de 2026/27 (ver Paso 2), todas las
 jornadas devuelven la misma proyección de pretemporada — no es un error, es que
 todavía no hay ningún resultado real que incorporar.
 
