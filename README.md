@@ -98,7 +98,8 @@ de empates. Es el fichero que dice si un cambio mejora de verdad o solo lo parec
 python scripts/simulate_season.py
 ```
 
-Simula 20.000 temporadas completas y genera todos los ficheros de resultados.
+Simula 20.000 temporadas completas y genera todos los ficheros de resultados —
+CSV por separado y un `season_predictions.xlsx` con las mismas tablas, una por hoja.
 Tarda unos 2 segundos.
 
 | Opción | Efecto |
@@ -107,6 +108,7 @@ Tarda unos 2 segundos.
 | `--matchday 1` | Sólo esa jornada, probabilidades analíticas |
 | `--date 2026-08-22` | Sólo los partidos de esa fecha |
 | `--played fichero.csv` | Incorporar resultados ya disputados |
+| `--through 5` | Predicción completa tras la jornada 5, detectando resultados solo (ver abajo) |
 | `--as-of 2026-12-01` | Ratings calculados a otra fecha |
 | `--no-defaults` | Sin el prior de equipos ascendidos |
 | `--no-squad-prior` | Sin el prior de valor de plantilla (fichajes) |
@@ -136,6 +138,22 @@ como base y sólo se simula lo que queda. Es el modo que usarás cada jornada.
 ```bash
 python scripts/simulate_season.py --played results/jugados.csv
 ```
+
+#### Simulación durante la temporada, sin CSV manual
+
+`--through N` hace lo mismo que `--played`, pero detectando solo qué partidos de la
+jornada 1 a la N ya tienen resultado real en `epl_matches.csv` -cruzando contra el
+calendario, igual que `season_trajectory.py`- y ajustando el `--as-of` a esa fecha. Es
+la predicción completa, no sólo el resumen de título: clasificación, partidos, matriz
+de posiciones, todo anclado a esa jornada.
+
+```bash
+python scripts/simulate_season.py --through 5
+```
+
+Incompatible con `--played` -- si pasas los dos, aborta con un error en vez de elegir
+uno en silencio. Mientras `epl_matches.csv` no tenga partidos reales de esa jornada,
+se comporta igual que sin `--through` (proyección de pretemporada), avisándolo por log.
 
 El CSV debe tener las columnas `home`, `away`, `home_goals`, `away_goals`, con los
 nombres en nomenclatura canónica (la de `team_names.csv`).
@@ -203,9 +221,14 @@ Simula la temporada tal como se veía **en cada jornada**, desde la 0 (pretempor
 hasta la última con resultados reales cargados: para la jornada N usa como partidos ya
 jugados sólo los que de verdad se disputaron hasta ahí (detectados automáticamente
 cruzando el calendario con `epl_matches.csv`, sin mantener ningún CSV a mano) y simula
-el resto. Guarda todas las jornadas juntas en `results/title_trajectory.csv` — pensado
-para graficarlo en Excel o donde prefieras y ver cómo sube o baja el título de cada
-equipo con cada resultado.
+el resto. Para la predicción COMPLETA de una única jornada -no sólo el título, también
+partidos y matriz de posiciones- usa `simulate_season.py --through N` (Paso 3).
+
+Guarda todas las jornadas en `results/title_trajectory.csv` (formato largo, una fila
+por equipo y jornada) y en `results/title_trajectory.xlsx`, con una hoja adicional por
+cada métrica (`P(título)`, `P(top-4)`, `P(descenso)`, `Puntos medios`) ya pivotada
+jornada × equipo — selecciona el rango en Excel e inserta un gráfico de líneas
+directamente, sin tener que armar la tabla dinámica.
 
 Mientras `epl_matches.csv` no tenga partidos de 2026/27 (ver Paso 5), todas las
 jornadas devuelven la misma proyección de pretemporada — no es un error, es que
@@ -231,6 +254,8 @@ Todo se escribe en `results/`, que está en `.gitignore`.
 | `raw_points.csv` | n_sims | Sólo con `--save-raw`. Puntos de cada simulación, para análisis propios |
 | `player_predictions.csv` | ~785 | Uno por jugador con historial en Premier: goles/asistencias medios, P10/P90, P(Bota de Oro), P(máximo asistente). Genera `predict_players.py` |
 | `title_trajectory.csv` | 20 × jornadas | Probabilidades de título/top-4/descenso de cada equipo, una vez por jornada simulada. Genera `season_trajectory.py` |
+| `season_predictions.xlsx` | — | `season_probabilities`, `match_predictions`, `position_matrix` y `points_distribution`, una por hoja. Mismo contenido que los CSV de arriba, junto en un Excel |
+| `title_trajectory.xlsx` | — | El detalle de `title_trajectory.csv` más una hoja por métrica ya pivotada jornada × equipo, lista para graficar |
 
 ---
 

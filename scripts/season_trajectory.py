@@ -38,20 +38,10 @@ from src.congestion import load_club_matches, team_date_index
 from src.ratings import apply_defaults, apply_squad_prior, fit_ratings
 from src.simulator import simulate_season
 from src.squad import current_squad_value
-from src.utils import RESULTS_DIR, load_fixtures, load_matches, load_teams_2026_27, logger
+from src.utils import (RESULTS_DIR, load_fixtures, load_matches,
+                       load_teams_2026_27, logger, matches_played_through)
 
 SEASON_LABEL = "2026-27"
-
-
-def played_through(fixtures: pd.DataFrame, season_matches: pd.DataFrame, matchday: int) -> pd.DataFrame:
-    """
-    Partidos de `fixtures` con matchday <= N cuyo resultado real ya está en
-    `season_matches` (epl_matches.csv de la temporada en curso). Cruce por
-    home/away: ambos usan la nomenclatura canónica de team_names.csv.
-    """
-    upto = fixtures[fixtures["matchday"] <= matchday][["home", "away"]]
-    real = season_matches[["home", "away", "home_goals", "away_goals"]]
-    return upto.merge(real, on=["home", "away"], how="inner")
 
 
 def main():
@@ -91,7 +81,7 @@ def main():
 
     rows = []
     for md in range(args.from_md, to_md + 1):
-        played = played_through(fixtures, season_matches, md)
+        played = matches_played_through(fixtures, season_matches, md)
         # as_of: el día después del último partido de esta jornada con fecha en el calendario,
         # o el as_of de pretemporada si aún no hay ninguna jornada con resultado real.
         md_dates = fixtures.loc[fixtures["matchday"] <= md, "date"]
@@ -114,10 +104,24 @@ def main():
               f"líder: {lider['team']:<16} {lider['p_titulo']*100:>5.1f}% título")
 
     out = pd.concat(rows, ignore_index=True)
-    path = RESULTS_DIR / "title_trajectory.csv"
-    out.to_csv(path, index=False)
+    csv_path = RESULTS_DIR / "title_trajectory.csv"
+    out.to_csv(csv_path, index=False)
 
-    print(f"\n  Guardado en {path}")
+    xlsx_path = RESULTS_DIR / "title_trajectory.xlsx"
+    with pd.ExcelWriter(xlsx_path, engine="openpyxl") as xw:
+        out.to_excel(xw, sheet_name="Trayectoria (detalle)", index=False)
+        # Una hoja por métrica, ya pivotada jornada x equipo: lista para graficar
+        # como líneas en Excel sin que el usuario tenga que armar la tabla dinámica.
+        pivots = {
+            "P(título)": "p_titulo", "P(top-4)": "p_top4",
+            "P(descenso)": "p_descenso", "Puntos medios": "pts_medios",
+        }
+        for sheet, col in pivots.items():
+            pivot = out.pivot(index="matchday", columns="team", values=col)
+            pivot.to_excel(xw, sheet_name=sheet)
+
+    print(f"\n  Guardado en {csv_path}")
+    print(f"  Guardado en {xlsx_path} (con hojas por métrica ya pivotadas jornada x equipo)")
     print(f"  Tiempo total: {time.time() - t0:.1f}s\n")
 
 

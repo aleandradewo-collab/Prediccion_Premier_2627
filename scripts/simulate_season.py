@@ -7,6 +7,7 @@ Uso:
     python scripts/simulate_season.py --matchday 1       # sólo jornada 1
     python scripts/simulate_season.py --date 2026-08-22  # sólo esa fecha
     python scripts/simulate_season.py --played results/jugados.csv
+    python scripts/simulate_season.py --through 5        # predicción completa tras la jornada 5
     python scripts/simulate_season.py --save-raw         # + simulaciones crudas
 
 Con --matchday o --date no se lanza Monte Carlo: se muestran las probabilidades
@@ -15,7 +16,14 @@ analíticas de esos partidos, que son exactas e instantáneas.
 Con --played se incorporan los resultados ya disputados y sólo se simula lo que
 queda de temporada. El CSV debe tener columnas: home, away, home_goals, away_goals.
 
-Resultados en results/
+Con --through N se hace lo mismo que --played, pero sin CSV manual: detecta
+automáticamente qué partidos de la jornada 1 a la N ya tienen resultado real
+en epl_matches.csv (cruzando contra el calendario) y ajusta los ratings a la
+fecha correspondiente. Es la predicción COMPLETA -clasificación, partidos,
+matriz de posiciones- anclada a una jornada concreta; para ver cómo cambia
+jornada a jornada de una sentada, usa scripts/season_trajectory.py.
+
+Resultados en results/ (CSV y un season_predictions.xlsx con todo junto)
 """
 
 import argparse
@@ -32,15 +40,14 @@ from src.ratings import apply_defaults, apply_squad_prior, fit_ratings
 from src.simulator import export_results, predict_fixtures, simulate_season
 from src.squad import current_squad_value
 from src.utils import (RESULTS_DIR, load_fixtures, load_matches,
-                       load_teams_2026_27, logger)
+                       load_teams_2026_27, logger, matches_played_through)
+
+SEASON_LABEL = "2026-27"
 
 
-def build_ratings(args):
-    matches = load_matches()
+def build_ratings(matches, args, as_of):
     teams = load_teams_2026_27()
-    logger.info(f"Histórico: {len(matches):,} partidos")
-
-    r = fit_ratings(matches, as_of=args.as_of,
+    r = fit_ratings(matches, as_of=as_of,
                     half_life_days=args.half_life,
                     prior_strength=args.prior, verbose=True)
     if not args.no_defaults:
@@ -87,6 +94,9 @@ def main():
     p.add_argument("--date", help="Predecir sólo los partidos de esta fecha")
     p.add_argument("--played", type=Path,
                    help="CSV de partidos ya jugados: home, away, home_goals, away_goals")
+    p.add_argument("--through", type=int, metavar="N",
+                   help="Predicción completa tras la jornada N, detectando resultados reales "
+                        "de epl_matches.csv automáticamente (incompatible con --played)")
     p.add_argument("--no-defaults", action="store_true",
                    help="No aplicar el prior de equipos ascendidos")
     p.add_argument("--no-squad-prior", action="store_true",
@@ -99,13 +109,40 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
 
+    if args.through is not None and args.played:
+        sys.exit("--through y --played son incompatibles: --through detecta los resultados solo.")
+
     print("\n" + "=" * 60)
     print("   PREMIER LEAGUE 2026/27 — PREDICTOR")
     print("=" * 60 + "\n")
 
     t0 = time.time()
+    matches = load_matches()
+    logger.info(f"Histórico: {len(matches):,} partidos")
     fixtures = load_fixtures()
-    ratings = build_ratings(args)
+
+    # ── --through: detecta resultados reales y ajusta el as_of automáticamente ──
+    as_of = args.as_of
+    played = None
+    if args.through is not None:
+        season_matches = matches[matches["season"] == SEASON_LABEL]
+        played = matches_played_through(fixtures, season_matches, args.through)
+        if played.empty:
+            logger.info(f"Jornada {args.through}: sin resultados reales en epl_matches.csv "
+                        f"todavía — usando la proyección de pretemporada.")
+        else:
+            last_date = fixtures.loc[fixtures["matchday"] <= args.through, "date"].max()
+            as_of = (last_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+            logger.info(f"Jornada {args.through}: {len(played)} partidos reales ya jugados "
+                        f"(as_of={as_of})")
+    elif args.played:
+        played = pd.read_csv(args.played)
+        req = {"home", "away", "home_goals", "away_goals"}
+        if not req.issubset(played.columns):
+            sys.exit(f"{args.played} debe tener las columnas {sorted(req)}")
+        logger.info(f"Incorporando {len(played)} partidos ya jugados")
+
+    ratings = build_ratings(matches, args, as_of=as_of)
 
     date_index = None
     if not args.no_congestion:
@@ -127,14 +164,6 @@ def main():
         return
 
     # ── Modo temporada completa ──────────────────────────────────────────────
-    played = None
-    if args.played:
-        played = pd.read_csv(args.played)
-        req = {"home", "away", "home_goals", "away_goals"}
-        if not req.issubset(played.columns):
-            sys.exit(f"{args.played} debe tener las columnas {sorted(req)}")
-        logger.info(f"Incorporando {len(played)} partidos ya jugados")
-
     res = simulate_season(ratings, fixtures, played=played,
                           n_sims=args.sims, seed=args.seed, date_index=date_index)
 
